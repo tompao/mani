@@ -1,4 +1,4 @@
-module github.com/alajmo/mani
+module github.com/tompao/mani
 
 go 1.16
 
