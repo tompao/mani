@@ -1,36 +1,24 @@
 package core
 
 import (
-	"path/filepath"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 	"os"
 	"os/exec"
-	"encoding/json"
+	"os/user"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
 )
 
-type TreeNode struct {
-   Name     string
-   Children []TreeNode
-}
+const ANSI = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
 
-func AddToTree(root []TreeNode, names []string) []TreeNode {
-    if len(names) > 0 {
-        var i int
-        for i = 0; i < len(root); i++ {
-            if root[i].Name == names[0] { // already in tree
-                break
-            }
-        }
+var RE = regexp.MustCompile(ANSI)
 
-        if i == len(root) {
-			root = append(root, TreeNode { Name: names[0], Children: [] TreeNode{} })
-        }
-
-        root[i].Children = AddToTree(root[i].Children, names[1:])
-    }
-
-    return root
+func Strip(str string) string {
+	return RE.ReplaceAllString(str, "")
 }
 
 func StringInSlice(a string, list []string) bool {
@@ -53,30 +41,30 @@ func Intersection(a []string, b []string) []string {
 	return i
 }
 
-func GetWdRemoteUrl(path string) string {
+func GetWdRemoteUrl(path string) (string, error) {
 	cwd, err := os.Getwd()
-	CheckIfError(err)
+	if err != nil {
+		return "", err
+	}
 
 	gitDir := filepath.Join(cwd, ".git")
 	if _, err := os.Stat(gitDir); !os.IsNotExist(err) {
-		return GetRemoteUrl(cwd)
+		url, rErr := GetRemoteUrl(cwd)
+		return url, rErr
 	}
 
-	return ""
+	return "", nil
 }
 
-func GetRemoteUrl(path string) string {
+func GetRemoteUrl(path string) (string, error) {
 	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
 	cmd.Dir = path
 	output, err := cmd.CombinedOutput()
-	var url string
 	if err != nil {
-		url = ""
-	} else {
-		url = strings.TrimSuffix(string(output), "\n")
+		return "", err
 	}
 
-	return url
+	return strings.TrimSuffix(string(output), "\n"), nil
 }
 
 func FindFileInParentDirs(path string, files []string) (string, error) {
@@ -91,101 +79,139 @@ func FindFileInParentDirs(path string, files []string) (string, error) {
 	parentDir := filepath.Dir(path)
 
 	// TODO: Check different path if on windows subsystem
+	// Perhaps instead of the below SYSTEMDRIVE, just use "\\"
 	// https://stackoverflow.com/questions/151860/root-folder-equivalent-in-windows/152038
-	// https://en.wikipedia.org/wiki/Directory_structure#:~:text=In%20DOS%2C%20Windows%2C%20and%20OS,to%20being%20combined%20as%20one.
-	// Seems it's \ in windows
-	if parentDir == "/" {
-		return "", &ConfigNotFound{files}
+	if runtime.GOOS == "windows" {
+		winRootDir := os.Getenv("SYSTEMDRIVE") + "\\"
+		if parentDir == winRootDir {
+			return "", &ConfigNotFound{files}
+		}
+	} else {
+		if parentDir == "/" {
+			return "", &ConfigNotFound{files}
+		}
 	}
 
 	return FindFileInParentDirs(parentDir, files)
 }
 
-func EvaluateEnv(envList []string) ([]string, error) {
-	var envs []string
-
-	for _, arg := range envList {
-		kv := strings.SplitN(arg, "=", 2)
-
-		if strings.HasPrefix(kv[1], "$(") && strings.HasSuffix(kv[1], ")") {
-			kv[1] = strings.TrimPrefix(kv[1], "$(")
-			kv[1] = strings.TrimSuffix(kv[1], ")")
-
-			out, err := exec.Command("sh", "-c", kv[1]).Output()
-			if err != nil {
-				return envs, &ConfigEnvFailed { Name: kv[0], Err: err }
-			}
-
-			envs = append(envs, fmt.Sprintf("%v=%v", kv[0], string(out)))
-		} else {
-			envs = append(envs, fmt.Sprintf("%v=%v", kv[0], kv[1]))
-		}
-	}
-
-	return envs, nil
+func GetRelativePath(configDir string, path string) (string, error) {
+	relPath, err := filepath.Rel(configDir, path)
+	return relPath, err
 }
 
-// Order of preference (highest to lowest):
-// 1. User argument
-// 2. Command Env
-// 3. Parent Env
-// 4. Global Env
-func MergeEnv(userEnv []string, cmdEnv []string, parentEnv []string, globalEnv []string) []string {
-	var envs []string
-	args := make(map[string]bool)
+// Get the absolute path
+// Need to support following path types:
+//		lala/land
+//		./lala/land
+//		../lala/land
+//		/lala/land
+//		$HOME/lala/land
+//		~/lala/land
+//		~root/lala/land
+func GetAbsolutePath(configDir string, path string, name string) (string, error) {
+	path = os.ExpandEnv(path)
 
-	// User Env
-	for _, elem := range userEnv {
-		elem = strings.TrimSuffix(elem, "\n")
-
-		kv := strings.SplitN(elem, "=", 2)
-		envs = append(envs, elem)
-		args[kv[0]] = true
+	usr, err := user.Current()
+	if err != nil {
+		return "", err
 	}
 
-	// Command Env
-	for _, elem := range cmdEnv {
-		elem = strings.TrimSuffix(elem, "\n")
+	homeDir := usr.HomeDir
 
-		kv := strings.SplitN(elem, "=", 2)
-		_, ok := args[kv[0]]
-
-		if  !ok {
-			envs = append(envs, elem)
-			args[kv[0]] = true
-		}
+	// TODO: Remove any .., make path absolute and then cut of configDir
+	if path == "~" {
+		path = homeDir
+	} else if strings.HasPrefix(path, "~/") {
+		path = filepath.Join(homeDir, path[2:])
+	} else if len(path) > 0 && filepath.IsAbs(path) { // TODO: Rewrite this
+	} else if len(path) > 0 {
+		path = filepath.Join(configDir, path)
+	} else {
+		path = filepath.Join(configDir, name)
 	}
 
-	// Parent Env
-	for _, elem := range parentEnv {
-		elem = strings.TrimSuffix(elem, "\n")
-
-		kv := strings.SplitN(elem, "=", 2)
-		_, ok := args[kv[0]]
-
-		if  !ok {
-			envs = append(envs, elem)
-			args[kv[0]] = true
-		}
-	}
-
-	// Config Env
-	for _, elem := range globalEnv {
-		elem = strings.TrimSuffix(elem, "\n")
-
-		kv := strings.SplitN(elem, "=", 2)
-		_, ok := args[kv[0]]
-
-		if  !ok {
-			envs = append(envs, elem)
-			args[kv[0]] = true
-		}
-	}
-
-	return envs
+	return path, nil
 }
 
-func DebugPrint(data interface{}) {
+// Get the absolute path
+// Need to support following path types:
+//		lala/land
+//		./lala/land
+//		../lala/land
+//		/lala/land
+//		$HOME/lala/land
+//		~/lala/land
+//		~root/lala/land
+func ResolveTildePath(path string) (string, error) {
+	path = os.ExpandEnv(path)
+
+	usr, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	homeDir := usr.HomeDir
+
+	var p string
+	if path == "~" {
+		p = homeDir
+	} else if strings.HasPrefix(path, "~/") {
+		p = filepath.Join(homeDir, path[2:])
+	} else {
+		p = path
+	}
+
+	return p, nil
+}
+
+// FormatShell returns the shell program and associated command flag
+func FormatShell(shell string) string {
+	s := strings.Split(shell, " ")
+
+	if len(s) > 1 { // User provides correct flag, bash -c, /bin/bash -c, /bin/sh -c
+		return shell
+	} else if strings.Contains(shell, "bash") { // bash, /bin/bash
+		return shell + " -c"
+	} else if strings.Contains(shell, "zsh") { // zsh, /bin/zsh
+		return shell + " -c"
+	} else if strings.Contains(shell, "sh") { // sh, /bin/sh
+		return shell + " -c"
+	} else if strings.Contains(shell, "node") { // node, /bin/node
+		return shell + " -e"
+	} else if strings.Contains(shell, "python") { // python, /bin/python
+		return shell + " -c"
+	}
+
+	return shell
+}
+
+// FormatShellString returns the shell program (bash,sh,.etc) along with the
+// command flag and subsequent commands
+// Example:
+// "bash", "-c echo hello world"
+func FormatShellString(shell string, command string) (string, []string) {
+	shellProgram := FormatShell(shell)
+	args := strings.SplitN(shellProgram, " ", 2)
+	return args[0], append(args[1:], command)
+}
+
+// Used when creating pointers to literal. Useful when you want set/unset attributes.
+func Ptr[T any](t T) *T {
+	return &t
+}
+
+func StringsToErrors(str []string) []error {
+	errs := []error{}
+	for _, s := range str {
+		errs = append(errs, errors.New(s))
+	}
+
+	return errs
+}
+
+func DebugPrint(data any) {
 	s, _ := json.MarshalIndent(data, "", "\t")
+	fmt.Println()
 	fmt.Print(string(s))
+	fmt.Println()
 }

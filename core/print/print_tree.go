@@ -5,20 +5,31 @@ import (
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/list"
-	// "github.com/jedib0t/go-pretty/v6/text"
-	// color "github.com/logrusorgru/aurora"
 
 	"github.com/alajmo/mani/core"
+	"github.com/alajmo/mani/core/dao"
 )
 
-func PrintTree(output string, tree []core.TreeNode) {
+func PrintTree(config *dao.Config, theme dao.Theme, listFlags *core.ListFlags, tree []dao.TreeNode) {
+	var treeStyle list.Style
+	switch theme.Tree.Style {
+	case "bullet-square":
+		treeStyle = list.StyleBulletSquare
+	case "bullet-circle":
+		treeStyle = list.StyleBulletCircle
+	case "bullet-star":
+		treeStyle = list.StyleBulletStar
+	case "connected-bold":
+		treeStyle = list.StyleConnectedBold
+	default: // connected-light
+		treeStyle = list.StyleConnectedLight
+	}
+
 	l := list.NewWriter()
-
-	l.SetStyle(TreeStyle)
-
+	l.SetStyle(treeStyle)
 	printTreeNodes(l, tree, 0)
 
-	switch output {
+	switch listFlags.Output {
 	case "markdown":
 		printTree(l.RenderMarkdown())
 	case "html":
@@ -28,15 +39,14 @@ func PrintTree(output string, tree []core.TreeNode) {
 	}
 }
 
-func printTreeNodes(l list.Writer, tree []core.TreeNode, depth int) {
+func printTreeNodes(l list.Writer, tree []dao.TreeNode, depth int) {
 	for _, n := range tree {
 		for i := 0; i < depth; i++ {
 			l.Indent()
 		}
 
 		l.AppendItem(n.Name)
-
-		printTreeNodes(l, n.Children, depth + 1)
+		printTreeNodes(l, n.Children, depth+1)
 
 		for i := 0; i < depth; i++ {
 			l.UnIndent()

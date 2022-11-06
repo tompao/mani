@@ -1,0 +1,54 @@
+Index: 3
+Name: Describe all projects
+WantErr: false
+Cmd:
+mani describe projects
+
+---
+
+Name: example
+Path: .
+Description: 
+Url: 
+Sync: true
+Env: 
+    MANI_PROJECT_PATH: /home/test/test/tmp/golden/describe/golden-3
+    MANI_PROJECT_URL: 
+
+--
+
+Name: pinto
+Path: frontend/pinto
+Description: 
+Url: https://github.com/alajmo/pinto
+Sync: true
+Tags: frontend
+Env: 
+    MANI_PROJECT_PATH: /home/test/test/tmp/golden/describe/golden-3/frontend/pinto
+    MANI_PROJECT_URL: https://github.com/alajmo/pinto
+
+--
+
+Name: dashgrid
+Path: frontend/dashgrid
+Description: 
+Url: https://github.com/alajmo/dashgrid
+Sync: true
+Tags: frontend, misc
+Env: 
+    MANI_PROJECT_PATH: /home/test/test/tmp/golden/describe/golden-3/frontend/dashgrid
+    MANI_PROJECT_URL: https://github.com/alajmo/dashgrid
+
+--
+
+Name: template-generator
+Path: template-generator
+Description: 
+Url: https://github.com/alajmo/template-generator
+Sync: true
+Tags: cli
+Env: 
+    MANI_PROJECT_PATH: /home/test/test/tmp/golden/describe/golden-3/template-generator
+    MANI_PROJECT_URL: https://github.com/alajmo/template-generator
+    branch: master
+

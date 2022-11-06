@@ -1,32 +1,37 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/alajmo/mani/core"
-	"github.com/alajmo/mani/core/print"
 	"github.com/alajmo/mani/core/dao"
+	"github.com/alajmo/mani/core/print"
 )
 
 func describeProjectsCmd(config *dao.Config, configErr *error) *cobra.Command {
-	var tags []string
-	var dirs []string
-	var edit bool
-	var projects []string
+	var projectFlags core.ProjectFlags
 
 	cmd := cobra.Command{
-		Aliases: []string { "project", "proj" },
-		Use:   "projects [projects] [flags]",
-		Short: "Describe projects",
-		Long:  "Describe projects.",
-		Example: `  # Describe projects
+		Aliases: []string{"project", "prj"},
+		Use:     "projects [projects]",
+		Short:   "Describe projects",
+		Long:    "Describe projects.",
+		Example: `  # Describe all projects
   mani describe projects
 
-  # Describe projects that have tag frontend
-  mani describe projects --tags frontend`,
+  # Describe project <project>
+  mani describe projects <project>
+
+  # Describe projects that have tag <tag>
+  mani describe projects --tags <tag>
+
+  # Describe projects matching paths <path>
+  mani describe projects --paths <path>`,
 		Run: func(cmd *cobra.Command, args []string) {
 			core.CheckIfError(*configErr)
-			describeProjects(config, args, tags, dirs, projects, edit)
+			describeProjects(config, args, projectFlags)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if *configErr != nil {
@@ -36,9 +41,10 @@ func describeProjectsCmd(config *dao.Config, configErr *error) *cobra.Command {
 			projectNames := config.GetProjectNames()
 			return projectNames, cobra.ShellCompDirectiveNoFileComp
 		},
+		DisableAutoGenTag: true,
 	}
 
-	cmd.Flags().StringSliceVarP(&tags, "tags", "t", []string{}, "filter projects by their tag")
+	cmd.Flags().StringSliceVarP(&projectFlags.Tags, "tags", "t", []string{}, "filter projects by tags")
 	err := cmd.RegisterFlagCompletionFunc("tags", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if *configErr != nil {
 			return []string{}, cobra.ShellCompDirectiveDefault
@@ -49,18 +55,18 @@ func describeProjectsCmd(config *dao.Config, configErr *error) *cobra.Command {
 	})
 	core.CheckIfError(err)
 
-	cmd.Flags().StringSliceVarP(&dirs, "dirs", "d", []string{}, "filter projects by their path")
-	err = cmd.RegisterFlagCompletionFunc("dirs", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cmd.Flags().StringSliceVarP(&projectFlags.Paths, "paths", "d", []string{}, "filter projects by paths")
+	err = cmd.RegisterFlagCompletionFunc("paths", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if *configErr != nil {
 			return []string{}, cobra.ShellCompDirectiveDefault
 		}
 
-		options := config.GetDirs()
+		options := config.GetProjectPaths()
 		return options, cobra.ShellCompDirectiveDefault
 	})
 	core.CheckIfError(err)
 
-	cmd.Flags().BoolVarP(&edit, "edit", "e", false, "Edit project")
+	cmd.Flags().BoolVarP(&projectFlags.Edit, "edit", "e", false, "edit project")
 
 	return &cmd
 }
@@ -68,25 +74,30 @@ func describeProjectsCmd(config *dao.Config, configErr *error) *cobra.Command {
 func describeProjects(
 	config *dao.Config,
 	args []string,
-	tags []string,
-	dirs []string,
-	projects []string,
-	edit bool,
+	projectFlags core.ProjectFlags,
 ) {
-	if (edit) {
+	if projectFlags.Edit {
 		if len(args) > 0 {
-			config.EditProject(args[0])
+			err := config.EditProject(args[0])
+			core.CheckIfError(err)
 		} else {
-			config.EditProject("")
+			err := config.EditProject("")
+			core.CheckIfError(err)
 		}
 	} else {
-		nameProjects := config.GetProjectsByName(args)
-		dirProjects := config.GetProjectsByDirs(dirs)
-		tagProjects  := config.GetProjectsByTags(tags)
+		allProjects := false
+		if len(args) == 0 &&
+			len(projectFlags.Paths) == 0 &&
+			len(projectFlags.Tags) == 0 {
+			allProjects = true
+		}
 
-		filteredProjects := dao.GetIntersectProjects(nameProjects, tagProjects)
-		filteredProjects = dao.GetIntersectProjects(filteredProjects, dirProjects)
-
-		print.PrintProjectBlocks(filteredProjects)
+		projects, err := config.FilterProjects(false, allProjects, args, projectFlags.Paths, projectFlags.Tags)
+		core.CheckIfError(err)
+		if len(projects) == 0 {
+			fmt.Println("No projects")
+		} else {
+			print.PrintProjectBlocks(projects)
+		}
 	}
 }

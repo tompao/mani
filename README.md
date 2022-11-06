@@ -1,11 +1,30 @@
-[![Build Status](https://github.com/alajmo/mani/workflows/test/badge.svg)](https://github.com/alajmo/mani/actions)
-[![Release](https://img.shields.io/github/release-pre/alajmo/mani.svg)](https://github.com/alajmo/mani/releases)
-[![License](https://img.shields.io/badge/license-MIT-green)](https://img.shields.io/badge/license-MIT-green)
-[![Go Report Card](https://goreportcard.com/badge/github.com/alajmo/mani)](https://goreportcard.com/report/github.com/alajmo/mani)
+<h1 align="center"><code>mani</code></h1>
 
-# Mani
+<div align="center">
+  <a href="https://github.com/alajmo/mani/releases">
+    <img src="https://img.shields.io/github/release-pre/alajmo/mani.svg" alt="version">
+  </a>
 
-<img src="./res/logo-1.png" align="right"/>
+  <a href="https://github.com/alajmo/mani/actions">
+    <img src="https://github.com/alajmo/mani/workflows/release/badge.svg" alt="build status">
+  </a>
+
+  <a href="https://img.shields.io/badge/license-MIT-green">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
+  </a>
+
+  <a href="https://goreportcard.com/report/github.com/alajmo/mani">
+    <img src="https://goreportcard.com/badge/github.com/alajmo/mani" alt="Go Report Card">
+  </a>
+
+  <a href="https://pkg.go.dev/github.com/alajmo/mani">
+    <img src="https://pkg.go.dev/badge/github.com/alajmo/mani.svg" alt="reference">
+  </a>
+</div>
+
+<br>
+
+<img src="./res/logo.svg" align="right"/>
 
 `mani` is a CLI tool that helps you manage multiple repositories. It's useful when you are working with microservices, multi-project systems, many libraries or just a bunch of repositories and want a central place for pulling all repositories and running commands over them.
 
@@ -13,26 +32,31 @@ You specify repository and commands in a config file and then run the commands o
 
 ![demo](res/output.gif)
 
+Interested in managing your servers in a similar way? Checkout [sake](https://github.com/alajmo/sake)!
+
 ## Features
 
 - Clone multiple repositories in one command
+- Declarative configuration
 - Run custom or ad-hoc commands over multiple repositories
 - Flexible filtering
-- Declarative configuration
+- Customizable theme
 - Portable, no dependencies
 - Supports auto-completion
 
 ## Table of Contents
 
-* [Installation](#installation)
-  * [Building From Source](#building-from-source)
-* [Usage](#usage)
-  * [Create a New Mani Repository](#create-a-new-mani-repository)
-  * [Common Commands](#common-commands)
-  * [Documentation](#documentation)
-* [License](#license)
+- [Installation](#installation)
+  - [Building From Source](#building-from-source)
+- [Usage](#usage)
+  - [Create a New Mani Repository](#create-a-new-mani-repository)
+  - [Command Examples](#run-some-commands)
+  - [Documentation](#documentation)
+- [License](#license)
 
 ## Installation
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/mani.svg)](https://repology.org/project/mani/versions)
 
 `mani` is available on Linux and Mac, with partial support for Windows.
 
@@ -43,12 +67,33 @@ You specify repository and commands in a config file and then run the commands o
   curl -sfL https://raw.githubusercontent.com/alajmo/mani/main/install.sh | sh
   ```
 
-* Via GO install
-    ```sh
-    go get -u github.com/alajmo/mani
-    ```
+* via Homebrew
+  ```sh
+  brew tap alajmo/mani
+  brew install mani
+  ```
 
-Auto-completion is available via `mani completion bash|zsh|fish|powershell`.
+* via MacPorts
+  ```sh
+  sudo port install mani
+  ```
+
+* via Arch
+  ```sh
+  pacman -S mani
+  ```
+
+* via Nix
+  ```sh
+  nix-env -iA nixos.mani
+  ```
+
+* via Go
+  ```sh
+  go get -u github.com/alajmo/mani
+  ```
+
+Auto-completion is available via `mani completion bash|zsh|fish|powershell` and man page via `mani gen`.
 
 ### Building From Source
 
@@ -62,54 +107,40 @@ Auto-completion is available via `mani completion bash|zsh|fish|powershell`.
 
 ### Create a New Mani Repository
 
-Run the following command inside a directory containing your `git` repositories, to initialize a mani repo:
+Run the following command inside a directory containing your `git` repositories:
 
 ```sh
 $ mani init
 ```
 
-This will generate two files:
+This will generate **two** files:
 
 - `mani.yaml`: contains projects and custom tasks. Any sub-directory that has a `.git` inside it will be included (add the flag `--auto-discovery=false` to turn off this feature)
-- `.gitignore`: includes the projects specified in `mani.yaml` file
+- `.gitignore`: includes the projects specified in `mani.yaml` file. To opt out, use `mani init --vcs=none`.
 
 It can be helpful to initialize the `mani` repository as a git repository so that anyone can easily download the `mani` repository and run `mani sync` to clone all repositories and get the same project setup as you.
 
-### Common Commands
+### Run Some Commands
 
-```sh
-# Run arbitrary command (list all files for instance)
-mani exec --all-projects 'ls -alh'
+```bash
+# List all projects
+$ mani list projects
 
-# List all repositories
-mani list projects
-
-# List repositories in a tree-like format
-mani tree
-
-# Describe available tasks
-mani describe tasks
-
-# Run task for projects that have the frontend tag
-mani run list-files -t frontend
-
-# Run task for projects under a specific directory
-mani run list-files -d work/
-
-# Run task for specific project
-mani run list-files -p project-a
-
-# Open up mani.yaml in your preferred editor
-mani edit
+# Count number of files in each project in parallel
+$ mani exec --all --output table --parallel 'find . -type f | wc -l'
 ```
+
 ### Documentation
 
 Checkout the following to learn more about mani:
 
-- [Examples](_example)
-- [Documentation](docs/DOCUMENTATION.md)
-- [List of Useful Git Commands](docs/COMMANDS.md)
-- [Project Background](docs/PROJECT-BACKGROUND.md)
+- [Examples](examples)
+- [Config](docs/config.md)
+- [Commands](docs/commands.md)
+- [Changelog](/docs/changelog.md)
+- [Roadmap](/docs/roadmap.md)
+- [Project Background](docs/project-background.md)
+- [Contributing](docs/contributing.md)
 
 ## [License](LICENSE)
 

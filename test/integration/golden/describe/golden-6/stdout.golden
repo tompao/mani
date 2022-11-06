@@ -1,0 +1,18 @@
+Index: 6
+Name: Describe 1 project
+WantErr: false
+Cmd:
+mani describe projects pinto
+
+---
+
+Name: pinto
+Path: frontend/pinto
+Description: 
+Url: https://github.com/alajmo/pinto
+Sync: true
+Tags: frontend
+Env: 
+    MANI_PROJECT_PATH: /home/test/test/tmp/golden/describe/golden-6/frontend/pinto
+    MANI_PROJECT_URL: https://github.com/alajmo/pinto
+

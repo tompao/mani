@@ -1,55 +1,71 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jinzhu/copier"
 	"github.com/spf13/cobra"
-	"github.com/jedib0t/go-pretty/v6/table"
 
 	"github.com/alajmo/mani/core"
 	"github.com/alajmo/mani/core/dao"
-	"github.com/alajmo/mani/core/print"
+	"github.com/alajmo/mani/core/exec"
 )
 
 func execCmd(config *dao.Config, configErr *error) *cobra.Command {
-	var dryRun bool
-	var cwd bool
-	var allProjects bool
-	var dirs []string
-	var tags []string
-	var projects []string
-	var output string
+	var runFlags core.RunFlags
+	var setRunFlags core.SetRunFlags
 
 	cmd := cobra.Command{
 		Use:   "exec <command>",
 		Short: "Execute arbitrary commands",
 		Long: `Execute arbitrary commands.
 
-Single quote your command if you don't want the file globbing and environments variables expansion to take place
+Single quote your command if you don't want the
+file globbing and environments variables expansion to take place
 before the command gets executed in each directory.`,
 
 		Example: `  # List files in all projects
-  mani exec ls --all-projects
+  mani exec --all ls
 
-  # List all git files that have markdown suffix
-  mani exec 'git ls-files | grep -e ".md"' --all-projects`,
+  # List git files that have markdown suffix for all projects
+  mani exec --all 'git ls-files | grep -e ".md"'`,
 		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			core.CheckIfError(*configErr)
-			execute(args, config, output, dryRun, cwd, allProjects, dirs, tags, projects)
+
+			// This is necessary since cobra doesn't support pointers for bools
+			// (that would allow us to use nil as default value)
+			setRunFlags.Parallel = cmd.Flags().Changed("parallel")
+			setRunFlags.OmitEmpty = cmd.Flags().Changed("omit-empty")
+
+			execute(args, config, &runFlags, &setRunFlags)
 		},
+		DisableAutoGenTag: true,
 	}
 
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "don't execute any command, just print the output of the command to see what will be executed")
-	cmd.Flags().BoolVarP(&cwd, "cwd", "k", false, "current working directory")
-	cmd.Flags().BoolVarP(&allProjects, "all-projects", "a", false, "target all projects")
-	cmd.Flags().StringSliceVarP(&dirs, "dirs", "d", []string{}, "target projects by their path")
-	cmd.Flags().StringSliceVarP(&tags, "tags", "t", []string{}, "target projects by their tag")
-	cmd.Flags().StringSliceVarP(&projects, "projects", "p", []string{}, "target projects by their name")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Output list|table|markdown|html")
+	cmd.Flags().BoolVar(&runFlags.DryRun, "dry-run", false, "prints the command to see what will be executed")
+	cmd.Flags().BoolVarP(&runFlags.Silent, "silent", "s", false, "do not show progress when running tasks")
+	cmd.Flags().BoolVar(&runFlags.OmitEmpty, "omit-empty", false, "omit empty results")
+	cmd.Flags().BoolVar(&runFlags.Parallel, "parallel", false, "run tasks in parallel for each project")
+	cmd.Flags().StringVarP(&runFlags.Output, "output", "o", "", "set output [text|table|markdown|html]")
+	err := cmd.RegisterFlagCompletionFunc("output", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if *configErr != nil {
+			return []string{}, cobra.ShellCompDirectiveDefault
+		}
 
-	err := cmd.RegisterFlagCompletionFunc("projects", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		valid := []string{"table", "markdown", "html"}
+		return valid, cobra.ShellCompDirectiveDefault
+	})
+	core.CheckIfError(err)
+
+	cmd.Flags().BoolVarP(&runFlags.Cwd, "cwd", "k", false, "current working directory")
+
+	cmd.Flags().BoolVarP(&runFlags.All, "all", "a", false, "target all projects")
+
+	cmd.Flags().StringSliceVarP(&runFlags.Projects, "projects", "p", []string{}, "target projects by names")
+	err = cmd.RegisterFlagCompletionFunc("projects", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if *configErr != nil {
 			return []string{}, cobra.ShellCompDirectiveDefault
 		}
@@ -59,16 +75,19 @@ before the command gets executed in each directory.`,
 	})
 	core.CheckIfError(err)
 
-	err = cmd.RegisterFlagCompletionFunc("dirs", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cmd.Flags().StringSliceVarP(&runFlags.Paths, "paths", "d", []string{}, "target projects by paths")
+	err = cmd.RegisterFlagCompletionFunc("paths", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if *configErr != nil {
 			return []string{}, cobra.ShellCompDirectiveDefault
 		}
 
-		options := config.GetDirs()
+		options := config.GetProjectPaths()
+
 		return options, cobra.ShellCompDirectiveDefault
 	})
 	core.CheckIfError(err)
 
+	cmd.Flags().StringSliceVarP(&runFlags.Tags, "tags", "t", []string{}, "target projects by tags")
 	err = cmd.RegisterFlagCompletionFunc("tags", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if *configErr != nil {
 			return []string{}, cobra.ShellCompDirectiveDefault
@@ -79,13 +98,15 @@ before the command gets executed in each directory.`,
 	})
 	core.CheckIfError(err)
 
-	err = cmd.RegisterFlagCompletionFunc("output", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cmd.PersistentFlags().StringVar(&runFlags.Theme, "theme", "default", "set theme")
+	err = cmd.RegisterFlagCompletionFunc("theme", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if *configErr != nil {
 			return []string{}, cobra.ShellCompDirectiveDefault
 		}
 
-		valid := []string { "table", "markdown", "html" }
-		return valid, cobra.ShellCompDirectiveDefault
+		names := config.GetThemeNames()
+
+		return names, cobra.ShellCompDirectiveDefault
 	})
 	core.CheckIfError(err)
 
@@ -95,55 +116,41 @@ before the command gets executed in each directory.`,
 func execute(
 	args []string,
 	config *dao.Config,
-	outputFlag string,
-	dryRunFlag bool,
-	cwdFlag bool,
-	allProjectsFlag bool,
-	dirsFlag []string,
-	tagsFlag []string,
-	projectsFlag []string,
+	runFlags *core.RunFlags,
+	setRunFlags *core.SetRunFlags,
 ) {
-	// Table Style
-	switch config.Theme.Table {
-		case "ascii":
-			print.ManiList.Box = print.StyleBoxASCII
-		default:
-			print.ManiList.Box = print.StyleBoxDefault
-	}
-
-	projects := config.FilterProjects(cwdFlag, allProjectsFlag, dirsFlag, tagsFlag, projectsFlag)
+	projects, err := config.FilterProjects(runFlags.Cwd, runFlags.All, runFlags.Projects, runFlags.Paths, runFlags.Tags)
+	core.CheckIfError(err)
 
 	if len(projects) == 0 {
-		fmt.Println("No projects targeted")
-		return
-	}
+		fmt.Println("No targets")
+	} else {
+		cmd := strings.Join(args[0:], " ")
+		var tasks []dao.Task
 
-	spinner, err := dao.TaskSpinner()
-	core.CheckIfError(err)
+		task := dao.Task{Cmd: cmd, Name: "output"}
+		taskErrors := make([]dao.ResourceErrors[dao.Task], 1)
+		task.ParseTask(*config, &taskErrors[0])
 
-	err = spinner.Start()
-	core.CheckIfError(err)
-
-	cmd := strings.Join(args[0:], " ")
-	var data print.TableOutput
-
-	data.Headers = table.Row { "Project", "Output" }
-
-	for i, project := range projects {
-		data.Rows = append(data.Rows, table.Row { project.Name })
-
-		spinner.Message(fmt.Sprintf(" %v", project.Name))
-
-		output, err := dao.ExecCmd(config.Path, config.Shell, project, cmd, dryRunFlag)
-		if err != nil {
-			data.Rows[i] = append(data.Rows[i], err)
-		} else {
-			data.Rows[i] = append(data.Rows[i], output)
+		var configErr = ""
+		for _, taskError := range taskErrors {
+			if len(taskError.Errors) > 0 {
+				configErr = fmt.Sprintf("%s%s", configErr, dao.FormatErrors(taskError.Resource, taskError.Errors))
+			}
 		}
+		if configErr != "" {
+			core.CheckIfError(errors.New(configErr))
+		}
+
+		for range projects {
+			t := dao.Task{}
+			err := copier.Copy(&t, &task)
+			core.CheckIfError(err)
+			tasks = append(tasks, t)
+		}
+
+		target := exec.Exec{Projects: projects, Tasks: tasks, Config: *config}
+		err := target.Run([]string{}, runFlags, setRunFlags)
+		core.CheckIfError(err)
 	}
-
-	err = spinner.Stop()
-	core.CheckIfError(err)
-
-	print.PrintRun(outputFlag, data)
 }
